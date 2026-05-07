@@ -19,7 +19,7 @@ pipeline {
     IMAGE_PREFIX  = 'circleguard'
     GIT_SHA       = "${env.GIT_COMMIT?.take(7) ?: 'local'}"
     RELEASE_TAG   = "${env.TAG_NAME ?: 'v0.0.0-' + env.BUILD_NUMBER}"
-    KUBECONFIG    = credentials('kubeconfig-prod')
+    KUBECONFIG    = '/var/jenkins_home/kube.yaml'
     PROD_NS       = 'circleguard-prod'
   }
 

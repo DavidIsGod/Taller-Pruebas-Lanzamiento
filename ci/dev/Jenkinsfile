@@ -20,7 +20,7 @@ pipeline {
     REGISTRY      = 'registry.local:5000'
     IMAGE_PREFIX  = 'circleguard'
     GIT_SHA       = "${env.GIT_COMMIT?.take(7) ?: 'local'}"
-    KUBECONFIG    = credentials('kubeconfig-dev')
+    KUBECONFIG    = '/var/jenkins_home/kube.yaml'
   }
 
   stages {
