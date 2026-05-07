@@ -44,6 +44,17 @@ subprojects {
     }
 
     tasks.withType<Test> {
-        useJUnitPlatform()
+        useJUnitPlatform {
+            // Integration tests require external resources (Docker/Kafka) and run
+            // in the dedicated 'Integration tests' pipeline stage instead.
+            if (!project.hasProperty("runIntegration")) {
+                excludeTags("integration")
+            }
+        }
+        // Forward Docker API version so Testcontainers can connect to modern daemons.
+        environment("DOCKER_API_VERSION", System.getenv("DOCKER_API_VERSION") ?: "1.44")
+        // Use jenkins home for temp files to avoid /tmp size issues in Docker containers.
+        val customTmp = System.getenv("GRADLE_TEST_TMPDIR") ?: System.getProperty("java.io.tmpdir")
+        jvmArgs("-Djava.io.tmpdir=$customTmp")
     }
 }
