@@ -128,7 +128,7 @@ spec:
             - { name: NEO4J_AUTH, value: "none" }
           volumeMounts:
             - name: neo4j-config
-              mountPath: /var/lib/neo4j/conf/neo4j.conf
+              mountPath: /neo4j/conf/neo4j.conf
               subPath: neo4j.conf
 ---
 apiVersion: v1
