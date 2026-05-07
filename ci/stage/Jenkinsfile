@@ -58,7 +58,7 @@ pipeline {
             def port = portMap[svc]
             def image = "${IMAGE_PREFIX}/${svc}-service:stage"
             sh """
-              JAR=\$(ls services/circleguard-${svc}-service/build/libs/circleguard-${svc}-service-*.jar 2>/dev/null | head -1)
+              JAR=\$(ls services/circleguard-${svc}-service/build/libs/circleguard-${svc}-service-*.jar 2>/dev/null | grep -v '-plain.jar' | head -1)
               if [ -z "\$JAR" ]; then echo "ERROR: JAR missing for ${svc}"; exit 1; fi
               TMPDIR=\$(mktemp -d)
               cp "\$JAR" "\$TMPDIR/app.jar"
@@ -144,10 +144,10 @@ DOCKEREOF
           export E2E_FORM_URL=http://localhost:29085
           export E2E_GATE_URL=http://localhost:29086
 
-          pip3 install -q -r tests/e2e/requirements.txt
-          pytest tests/e2e --junitxml=build/e2e-results.xml -v || true
+          python3 -m pip install -q -r tests/e2e/requirements.txt
+          python3 -m pytest tests/e2e --junitxml=build/e2e-results.xml -v || true
 
-          kill $(lsof -t -i:29081 -i:29083 -i:29085 -i:29086 2>/dev/null) 2>/dev/null || true
+          pkill -f "kubectl.*port-forward" 2>/dev/null || true
         '''
       }
       post {
@@ -160,15 +160,15 @@ DOCKEREOF
     stage('Performance tests (Locust)') {
       steps {
         sh '''
-          pip3 install -q locust
+          python3 -m pip install -q locust
           kubectl -n ${STAGE_NS} port-forward svc/auth-service 39081:8081 &
           PF_PID=$!
           sleep 5
-          locust -f tests/performance/locustfile.py \
+          python3 -m locust -f tests/performance/locustfile.py \
             --host=http://localhost:39081 \
             --headless -u 20 -r 5 -t 30s \
             --csv=build/locust --html=build/locust.html || true
-          kill $PF_PID 2>/dev/null || true
+          pkill -f "kubectl.*port-forward" 2>/dev/null || true
         '''
         archiveArtifacts artifacts: 'build/locust*', allowEmptyArchive: true
       }
