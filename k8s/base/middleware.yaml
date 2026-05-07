@@ -114,6 +114,10 @@ spec:
   template:
     metadata: { labels: { app: neo4j } }
     spec:
+      volumes:
+        - name: neo4j-config
+          configMap:
+            name: neo4j-config
       containers:
         - name: neo4j
           image: neo4j:5-community
@@ -122,10 +126,10 @@ spec:
             - { containerPort: 7687 }
           env:
             - { name: NEO4J_AUTH, value: "none" }
-            - { name: NEO4J_server_default__listen__address, value: "0.0.0.0" }
-            - { name: NEO4J_server_bolt_listen__address, value: "0.0.0.0:7687" }
-            - { name: NEO4J_server_http_listen__address, value: "0.0.0.0:7474" }
-            - { name: NEO4J_dbms_security_auth__enabled, value: "false" }
+          volumeMounts:
+            - name: neo4j-config
+              mountPath: /var/lib/neo4j/conf/neo4j.conf
+              subPath: neo4j.conf
 ---
 apiVersion: v1
 kind: Service

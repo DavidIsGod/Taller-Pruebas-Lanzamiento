@@ -3,6 +3,7 @@ kind: Kustomization
 namespace: circleguard
 resources:
   - namespace.yaml
+  - neo4j-config.yaml
   - middleware.yaml
   - services.yaml
 commonLabels:
