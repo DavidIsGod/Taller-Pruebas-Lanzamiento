@@ -144,7 +144,7 @@ DOCKEREOF
           export E2E_FORM_URL=http://localhost:29085
           export E2E_GATE_URL=http://localhost:29086
 
-          python3 -m pip install -q -r tests/e2e/requirements.txt
+          python3 -m pip install -q --break-system-packages -r tests/e2e/requirements.txt
           python3 -m pytest tests/e2e --junitxml=build/e2e-results.xml -v || true
 
           pkill -f "kubectl.*port-forward" 2>/dev/null || true
@@ -160,7 +160,7 @@ DOCKEREOF
     stage('Performance tests (Locust)') {
       steps {
         sh '''
-          python3 -m pip install -q locust
+          python3 -m pip install -q --break-system-packages locust
           kubectl -n ${STAGE_NS} port-forward svc/auth-service 39081:8081 &
           PF_PID=$!
           sleep 5

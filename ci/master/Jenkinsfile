@@ -93,7 +93,7 @@ XML
           export E2E_AUTH_URL=http://localhost:39081
           export E2E_GATE_URL=http://localhost:39086
 
-          python3 -m pip install -q -r tests/e2e/requirements.txt
+          python3 -m pip install -q --break-system-packages -r tests/e2e/requirements.txt
           python3 -m pytest tests/e2e --junitxml=build/e2e-master.xml -v || true
 
           pkill -f "kubectl.*port-forward" 2>/dev/null || true
