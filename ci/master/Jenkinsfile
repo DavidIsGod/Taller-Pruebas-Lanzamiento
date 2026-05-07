@@ -5,7 +5,7 @@
 //   5. Promote images :prod-<sha> -> 6. Generate Release Notes (CHANGELOG)
 //   7. Manual approval -> 8. Deploy to production -> 9. Post-deploy smoke
 pipeline {
-  agent { label 'docker && kubectl' }
+  agent any
 
   options {
     timestamps()

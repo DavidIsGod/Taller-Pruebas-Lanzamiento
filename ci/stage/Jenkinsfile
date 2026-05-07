@@ -2,7 +2,7 @@
 // Re-uses the dev images, deploys to the stage namespace, and validates
 // the deployed system by running E2E + Locust performance tests against it.
 pipeline {
-  agent { label 'docker && kubectl' }
+  agent any
 
   options {
     timestamps()
