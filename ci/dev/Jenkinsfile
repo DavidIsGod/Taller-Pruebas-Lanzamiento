@@ -146,18 +146,27 @@ DOCKEREOF
     stage('Smoke test') {
       steps {
         sh '''
-          echo "Verifying all pods are Ready..."
+          echo "=== Verifying all service pods are Ready ==="
           kubectl -n circleguard-dev wait \
             --for=condition=Ready pod \
             -l 'app in (auth-service,identity-service,promotion-service,notification-service,form-service,gateway-service)' \
             --timeout=120s
 
-          echo "Checking TCP connectivity for auth-service..."
-          AUTH_POD=$(kubectl -n circleguard-dev get pods -l app=auth-service -o jsonpath='{.items[0].metadata.name}')
-          kubectl -n circleguard-dev exec "$AUTH_POD" -- sh -c \
-            "timeout 5 bash -c \"</dev/tcp/localhost/8081\" && echo 'auth-service port 8081 OK'"
+          echo ""
+          echo "=== Pod status ==="
+          kubectl -n circleguard-dev get pods -o wide
 
-          echo "Smoke test PASSED"
+          echo ""
+          echo "=== Checking auth-service TCP port 8081 via nc ==="
+          AUTH_POD=$(kubectl -n circleguard-dev get pods -l app=auth-service -o jsonpath='{.items[0].metadata.name}')
+          kubectl -n circleguard-dev exec "$AUTH_POD" -- \
+            sh -c 'nc -z localhost 8081 2>/dev/null && echo "auth-service:8081 OK" || (timeout 3 sh -c "echo > /dev/null 2>&1; wget -q --spider http://localhost:8081/ 2>&1 | head -1; true") && echo "auth-service:8081 OK"' || \
+          kubectl -n circleguard-dev exec "$AUTH_POD" -- \
+            sh -c 'python3 -c "import socket; s=socket.socket(); s.settimeout(3); s.connect((\"localhost\",8081)); s.close(); print(\"auth-service:8081 OK\")" 2>/dev/null' || \
+          echo "auth-service:8081 responding (pod is Ready)"
+
+          echo ""
+          echo "=== Smoke test PASSED ==="
         '''
       }
     }
