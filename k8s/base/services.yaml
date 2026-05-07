@@ -1,0 +1,180 @@
+# Per-service Deployment + Service for the 6 chosen microservices.
+# image:tag is patched per environment via kustomize overlays.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: auth-service, labels: { app: auth-service, tier: backend } }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: auth-service } }
+  template:
+    metadata: { labels: { app: auth-service } }
+    spec:
+      containers:
+        - name: app
+          image: circleguard/auth-service:dev
+          ports: [{ containerPort: 8081 }]
+          env:
+            - { name: SPRING_PROFILES_ACTIVE,    value: kubernetes }
+            - { name: IDENTITY_SERVICE_URL,       value: "http://identity-service:8083" }
+            - { name: SPRING_DATASOURCE_URL,      value: "jdbc:postgresql://postgres:5432/circleguard_auth" }
+            - { name: SPRING_DATASOURCE_USERNAME, value: admin }
+            - { name: SPRING_DATASOURCE_PASSWORD, value: password }
+          readinessProbe: { tcpSocket: { port: 8081 }, initialDelaySeconds: 30, periodSeconds: 10 }
+          livenessProbe:  { tcpSocket: { port: 8081 }, initialDelaySeconds: 90, periodSeconds: 20 }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: auth-service }
+spec:
+  selector: { app: auth-service }
+  ports: [{ port: 8081, targetPort: 8081 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: identity-service, labels: { app: identity-service } }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: identity-service } }
+  template:
+    metadata: { labels: { app: identity-service } }
+    spec:
+      containers:
+        - name: app
+          image: circleguard/identity-service:dev
+          ports: [{ containerPort: 8083 }]
+          env:
+            - { name: SPRING_PROFILES_ACTIVE,         value: kubernetes }
+            - { name: SPRING_DATASOURCE_URL,           value: "jdbc:postgresql://postgres:5432/circleguard_identity" }
+            - { name: SPRING_DATASOURCE_USERNAME,      value: admin }
+            - { name: SPRING_DATASOURCE_PASSWORD,      value: password }
+            - { name: SPRING_KAFKA_BOOTSTRAP_SERVERS,  value: "kafka:9092" }
+          readinessProbe: { tcpSocket: { port: 8083 }, initialDelaySeconds: 30, periodSeconds: 10 }
+          livenessProbe:  { tcpSocket: { port: 8083 }, initialDelaySeconds: 90, periodSeconds: 20 }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: identity-service }
+spec:
+  selector: { app: identity-service }
+  ports: [{ port: 8083, targetPort: 8083 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: promotion-service, labels: { app: promotion-service } }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: promotion-service } }
+  template:
+    metadata: { labels: { app: promotion-service } }
+    spec:
+      containers:
+        - name: app
+          image: circleguard/promotion-service:dev
+          ports: [{ containerPort: 8082 }]
+          env:
+            - { name: SPRING_PROFILES_ACTIVE,         value: kubernetes }
+            - { name: SPRING_DATASOURCE_URL,           value: "jdbc:postgresql://postgres:5432/circleguard_promotion" }
+            - { name: SPRING_DATASOURCE_USERNAME,      value: admin }
+            - { name: SPRING_DATASOURCE_PASSWORD,      value: password }
+            - { name: SPRING_KAFKA_BOOTSTRAP_SERVERS,  value: "kafka:9092" }
+            - { name: KAFKA_BOOTSTRAP,                 value: "kafka:9092" }
+            - { name: SPRING_NEO4J_URI,                value: "bolt://neo4j:7687" }
+            - { name: SPRING_NEO4J_AUTHENTICATION_USERNAME, value: neo4j }
+            - { name: SPRING_NEO4J_AUTHENTICATION_PASSWORD, value: password }
+          readinessProbe: { tcpSocket: { port: 8082 }, initialDelaySeconds: 30, periodSeconds: 10 }
+          livenessProbe:  { tcpSocket: { port: 8082 }, initialDelaySeconds: 90, periodSeconds: 20 }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: promotion-service }
+spec:
+  selector: { app: promotion-service }
+  ports: [{ port: 8082, targetPort: 8082 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: notification-service, labels: { app: notification-service } }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: notification-service } }
+  template:
+    metadata: { labels: { app: notification-service } }
+    spec:
+      containers:
+        - name: app
+          image: circleguard/notification-service:dev
+          ports: [{ containerPort: 8084 }]
+          env:
+            - { name: SPRING_PROFILES_ACTIVE,         value: kubernetes }
+            - { name: SPRING_KAFKA_BOOTSTRAP_SERVERS,  value: "kafka:9092" }
+            - { name: KAFKA_BOOTSTRAP,                 value: "kafka:9092" }
+          readinessProbe: { tcpSocket: { port: 8084 }, initialDelaySeconds: 30, periodSeconds: 10 }
+          livenessProbe:  { tcpSocket: { port: 8084 }, initialDelaySeconds: 90, periodSeconds: 20 }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: notification-service }
+spec:
+  selector: { app: notification-service }
+  ports: [{ port: 8084, targetPort: 8084 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: form-service, labels: { app: form-service } }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: form-service } }
+  template:
+    metadata: { labels: { app: form-service } }
+    spec:
+      containers:
+        - name: app
+          image: circleguard/form-service:dev
+          ports: [{ containerPort: 8085 }]
+          env:
+            - { name: SPRING_PROFILES_ACTIVE,         value: kubernetes }
+            - { name: PROMOTION_SERVICE_URL,           value: "http://promotion-service:8082" }
+            - { name: SPRING_DATASOURCE_URL,           value: "jdbc:postgresql://postgres:5432/circleguard_form" }
+            - { name: SPRING_DATASOURCE_USERNAME,      value: admin }
+            - { name: SPRING_DATASOURCE_PASSWORD,      value: password }
+            - { name: SPRING_KAFKA_BOOTSTRAP_SERVERS,  value: "kafka:9092" }
+          readinessProbe: { tcpSocket: { port: 8085 }, initialDelaySeconds: 30, periodSeconds: 10 }
+          livenessProbe:  { tcpSocket: { port: 8085 }, initialDelaySeconds: 90, periodSeconds: 20 }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: form-service }
+spec:
+  selector: { app: form-service }
+  ports: [{ port: 8085, targetPort: 8085 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: gateway-service, labels: { app: gateway-service } }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: gateway-service } }
+  template:
+    metadata: { labels: { app: gateway-service } }
+    spec:
+      containers:
+        - name: app
+          image: circleguard/gateway-service:dev
+          ports: [{ containerPort: 8086 }]
+          env:
+            - { name: SPRING_PROFILES_ACTIVE,  value: kubernetes }
+            - { name: AUTH_SERVICE_URL,         value: "http://auth-service:8081" }
+            - { name: SPRING_REDIS_HOST,        value: redis }
+            - { name: SPRING_REDIS_PORT,        value: "6379" }
+            - { name: SPRING_DATA_REDIS_HOST,   value: redis }
+            - { name: SPRING_DATA_REDIS_PORT,   value: "6379" }
+          readinessProbe: { tcpSocket: { port: 8086 }, initialDelaySeconds: 30, periodSeconds: 10 }
+          livenessProbe:  { tcpSocket: { port: 8086 }, initialDelaySeconds: 90, periodSeconds: 20 }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: gateway-service }
+spec:
+  selector: { app: gateway-service }
+  ports: [{ port: 8086, targetPort: 8086 }]

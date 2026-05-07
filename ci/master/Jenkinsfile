@@ -1,0 +1,137 @@
+// Master / production pipeline.
+// Trigger: tag push v*.*.* on the master branch.
+// Phases (Change Management):
+//   1. Build  -> 2. Unit  -> 3. Integration -> 4. Stage validation
+//   5. Promote images :prod-<sha> -> 6. Generate Release Notes (CHANGELOG)
+//   7. Manual approval -> 8. Deploy to production -> 9. Post-deploy smoke
+pipeline {
+  agent { label 'docker && kubectl' }
+
+  options {
+    timestamps()
+    timeout(time: 90, unit: 'MINUTES')
+    disableConcurrentBuilds()
+    buildDiscarder(logRotator(numToKeepStr: '50'))
+  }
+
+  environment {
+    REGISTRY      = 'registry.local:5000'
+    IMAGE_PREFIX  = 'circleguard'
+    GIT_SHA       = "${env.GIT_COMMIT?.take(7) ?: 'local'}"
+    RELEASE_TAG   = "${env.TAG_NAME ?: 'v0.0.0-' + env.BUILD_NUMBER}"
+    KUBECONFIG    = credentials('kubeconfig-prod')
+    PROD_NS       = 'circleguard-prod'
+  }
+
+  stages {
+    stage('Checkout') { steps { checkout scm } }
+
+    stage('Build & unit tests') {
+      steps { sh './gradlew --no-daemon clean test bootJar' }
+      post  { always { junit allowEmptyResults: true, testResults: '**/build/test-results/test/*.xml' } }
+    }
+
+    stage('Integration tests') {
+      steps { sh './gradlew --no-daemon integrationTest || ./gradlew --no-daemon test -Pgroups=integration' }
+      post  { always { junit allowEmptyResults: true, testResults: '**/build/test-results/integrationTest/*.xml' } }
+    }
+
+    stage('System tests (validate stage)') {
+      steps {
+        // We trust that ci/stage/Jenkinsfile passed for this commit; we re-execute
+        // E2E against stage to ensure the candidate is still healthy.
+        sh '''
+          STAGE_NS=circleguard-stage
+          AUTH_HOST=$(kubectl -n ${STAGE_NS} get svc auth-service -o jsonpath='{.spec.clusterIP}')
+          GATE_HOST=$(kubectl -n ${STAGE_NS} get svc gateway-service -o jsonpath='{.spec.clusterIP}')
+          export E2E_AUTH_URL=http://${AUTH_HOST}:8081
+          export E2E_GATE_URL=http://${GATE_HOST}:8086
+          python3 -m pip install -r tests/e2e/requirements.txt
+          pytest tests/e2e --junitxml=build/e2e-master.xml -v
+        '''
+      }
+      post { always { junit allowEmptyResults: true, testResults: 'build/e2e-master.xml' } }
+    }
+
+    stage('Build & push :prod images') {
+      steps {
+        script {
+          ['auth','identity','promotion','notification','form','gateway'].each { s ->
+            sh """
+              docker build \
+                -f services/circleguard-${s}-service/Dockerfile \
+                -t ${REGISTRY}/${IMAGE_PREFIX}/${s}-service:${RELEASE_TAG} \
+                -t ${REGISTRY}/${IMAGE_PREFIX}/${s}-service:${GIT_SHA} \
+                -t ${REGISTRY}/${IMAGE_PREFIX}/${s}-service:prod .
+              docker push ${REGISTRY}/${IMAGE_PREFIX}/${s}-service:${RELEASE_TAG}
+              docker push ${REGISTRY}/${IMAGE_PREFIX}/${s}-service:${GIT_SHA}
+              docker push ${REGISTRY}/${IMAGE_PREFIX}/${s}-service:prod
+            """
+          }
+        }
+      }
+    }
+
+    stage('Generate Release Notes') {
+      steps {
+        sh '''
+          chmod +x ci/scripts/release-notes.sh
+          ci/scripts/release-notes.sh "${RELEASE_TAG}" > RELEASE_NOTES.md
+          cat RELEASE_NOTES.md
+        '''
+        archiveArtifacts artifacts: 'RELEASE_NOTES.md'
+      }
+    }
+
+    stage('Manual approval') {
+      steps {
+        timeout(time: 30, unit: 'MINUTES') {
+          input message: "Promote ${RELEASE_TAG} to PRODUCTION?", ok: 'Deploy'
+        }
+      }
+    }
+
+    stage('Deploy to production (k8s)') {
+      steps {
+        sh '''
+          # Patch the master overlay with the actual release tag.
+          sed -i "s/TAG_PLACEHOLDER/${RELEASE_TAG}/g" k8s/overlays/master/kustomization.yaml
+          kubectl apply -k k8s/overlays/master
+          for d in auth-service identity-service promotion-service notification-service form-service gateway-service; do
+            kubectl -n ${PROD_NS} rollout status deployment/${d} --timeout=300s
+          done
+        '''
+      }
+    }
+
+    stage('Post-deploy smoke') {
+      steps {
+        sh '''
+          AUTH=$(kubectl -n ${PROD_NS} get svc auth-service -o jsonpath='{.spec.clusterIP}')
+          curl -fsS http://${AUTH}:8081/actuator/health
+        '''
+      }
+    }
+
+    stage('Tag & publish release') {
+      steps {
+        sh '''
+          git tag -a "${RELEASE_TAG}" -m "Release ${RELEASE_TAG}" || true
+          git push origin "${RELEASE_TAG}" || true
+        '''
+      }
+    }
+  }
+
+  post {
+    failure {
+      echo "PROD pipeline FAILED for ${env.RELEASE_TAG}. Triggering automatic rollback..."
+      sh '''
+        for d in auth-service identity-service promotion-service notification-service form-service gateway-service; do
+          kubectl -n ${PROD_NS} rollout undo deployment/${d} || true
+        done
+      '''
+    }
+    success { echo "Released ${env.RELEASE_TAG} successfully." }
+  }
+}

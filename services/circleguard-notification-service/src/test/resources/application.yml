@@ -1,0 +1,21 @@
+spring:
+  profiles:
+    active: test
+  kafka:
+    consumer:
+      group-id: notification-group
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+  mail:
+    host: localhost
+    port: 25
+auth:
+  api:
+    url: http://localhost:0
+jwt:
+  secret: "my-super-secret-dev-key-32-chars-long-12345678"
+  expiration: 3600000
+qr:
+  secret: "my-qr-secret-key-for-dev-1234567890"
+  expiration: 300

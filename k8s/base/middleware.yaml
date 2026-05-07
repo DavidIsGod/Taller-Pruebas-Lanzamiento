@@ -1,0 +1,117 @@
+# Middleware shared by all environments.
+# Single replicas, ephemeral storage (workshop scope).
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: postgres } }
+  template:
+    metadata: { labels: { app: postgres } }
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16
+          ports: [{ containerPort: 5432 }]
+          env:
+            - { name: POSTGRES_USER,     value: admin }
+            - { name: POSTGRES_PASSWORD, value: password }
+            - { name: POSTGRES_DB,       value: circleguard }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: postgres }
+spec:
+  selector: { app: postgres }
+  ports: [{ port: 5432, targetPort: 5432 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: redis }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: redis } }
+  template:
+    metadata: { labels: { app: redis } }
+    spec:
+      containers:
+        - name: redis
+          image: redis:7.2
+          ports: [{ containerPort: 6379 }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: redis }
+spec:
+  selector: { app: redis }
+  ports: [{ port: 6379, targetPort: 6379 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: kafka }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: kafka } }
+  template:
+    metadata: { labels: { app: kafka } }
+    spec:
+      # Prevent K8s service-link env vars (KAFKA_PORT=tcp://…) from
+      # being injected; cp-kafka misinterprets them as broker config.
+      enableServiceLinks: false
+      containers:
+        - name: kafka
+          image: confluentinc/cp-kafka:7.6.0
+          ports: [{ containerPort: 9092 }]
+          env:
+            - { name: KAFKA_NODE_ID,                            value: "1" }
+            - { name: KAFKA_PROCESS_ROLES,                      value: "broker,controller" }
+            - { name: KAFKA_CONTROLLER_QUORUM_VOTERS,           value: "1@localhost:9093" }
+            - { name: KAFKA_LISTENERS,                          value: "PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093" }
+            - { name: KAFKA_ADVERTISED_LISTENERS,               value: "PLAINTEXT://kafka:9092" }
+            - { name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP,     value: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT" }
+            - { name: KAFKA_CONTROLLER_LISTENER_NAMES,          value: "CONTROLLER" }
+            - { name: KAFKA_INTER_BROKER_LISTENER_NAME,         value: "PLAINTEXT" }
+            - { name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR,   value: "1" }
+            - { name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR,      value: "1" }
+            - { name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR, value: "1" }
+            - { name: CLUSTER_ID,                               value: "MkU3OEVBNTcwNTJENDM2Qk" }
+            - { name: KAFKA_LOG_DIRS,                           value: "/tmp/kraft-combined-logs" }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: kafka }
+spec:
+  selector: { app: kafka }
+  ports: [{ port: 9092, targetPort: 9092 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: neo4j }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: neo4j } }
+  template:
+    metadata: { labels: { app: neo4j } }
+    spec:
+      containers:
+        - name: neo4j
+          image: neo4j:5-community
+          ports:
+            - { containerPort: 7474 }
+            - { containerPort: 7687 }
+          env:
+            - { name: NEO4J_AUTH, value: "neo4j/password" }
+            - { name: NEO4J_server_default__listen__address, value: "0.0.0.0" }
+            - { name: NEO4J_server_bolt_listen__address, value: "0.0.0.0:7687" }
+            - { name: NEO4J_server_http_listen__address, value: "0.0.0.0:7474" }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: neo4j }
+spec:
+  selector: { app: neo4j }
+  ports:
+    - { name: http,  port: 7474, targetPort: 7474 }
+    - { name: bolt,  port: 7687, targetPort: 7687 }
