@@ -97,7 +97,7 @@ pipeline {
             def jarGlob = "services/circleguard-${svc}-service/build/libs/circleguard-${svc}-service-*.jar"
 
             sh """
-              JAR=\$(ls ${jarGlob} 2>/dev/null | head -1)
+              JAR=\$(ls ${jarGlob} 2>/dev/null | grep -Fv -- '-plain' | head -1)
               if [ -z "\$JAR" ]; then echo "ERROR: JAR missing for ${svc}"; exit 1; fi
               echo "Building ${image} from \$JAR"
 

@@ -115,7 +115,7 @@ XML
             def port = portMap[svc]
             def image = "${IMAGE_PREFIX}/${svc}-service:prod"
             sh """
-              JAR=\$(ls services/circleguard-${svc}-service/build/libs/circleguard-${svc}-service-*.jar 2>/dev/null | grep -v '\-plain\.jar' | head -1)
+              JAR=\$(ls services/circleguard-${svc}-service/build/libs/circleguard-${svc}-service-*.jar 2>/dev/null | grep -Fv -- '-plain' | head -1)
               if [ -z "\$JAR" ]; then echo "ERROR: JAR missing for ${svc}"; exit 1; fi
               TMPDIR=\$(mktemp -d)
               cp "\$JAR" "\$TMPDIR/app.jar"
