@@ -4,26 +4,21 @@ namespace: circleguard-prod
 resources:
   - ../../base
 images:
-  # Master overlay uses immutable git-sha tags injected by the pipeline.
-  - { name: circleguard/auth-service,         newTag: TAG_PLACEHOLDER }
-  - { name: circleguard/identity-service,     newTag: TAG_PLACEHOLDER }
-  - { name: circleguard/promotion-service,    newTag: TAG_PLACEHOLDER }
-  - { name: circleguard/notification-service, newTag: TAG_PLACEHOLDER }
-  - { name: circleguard/form-service,         newTag: TAG_PLACEHOLDER }
-  - { name: circleguard/gateway-service,      newTag: TAG_PLACEHOLDER }
+  - { name: circleguard/auth-service,         newName: circleguard/auth-service,         newTag: prod }
+  - { name: circleguard/identity-service,     newName: circleguard/identity-service,     newTag: prod }
+  - { name: circleguard/promotion-service,    newName: circleguard/promotion-service,    newTag: prod }
+  - { name: circleguard/notification-service, newName: circleguard/notification-service, newTag: prod }
+  - { name: circleguard/form-service,         newName: circleguard/form-service,         newTag: prod }
+  - { name: circleguard/gateway-service,      newName: circleguard/gateway-service,      newTag: prod }
 patches:
   - target: { kind: Namespace, name: circleguard }
     patch: |-
       - op: replace
         path: /metadata/name
         value: circleguard-prod
-  - target: { kind: Deployment, name: ".*" }
+  # Use IfNotPresent so kind doesn't try to pull from a remote registry.
+  - target: { kind: Deployment }
     patch: |-
-      - op: replace
-        path: /spec/replicas
-        value: 3
       - op: add
-        path: /spec/strategy
-        value:
-          type: RollingUpdate
-          rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: IfNotPresent

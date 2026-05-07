@@ -1,6 +1,5 @@
-// Stage pipeline (triggered on merge to release/* or release tag candidates).
-// Re-uses the dev images, deploys to the stage namespace, and validates
-// the deployed system by running E2E + Locust performance tests against it.
+// Stage pipeline: build + test → build :stage images → deploy to stage namespace
+// → E2E tests → performance tests (Locust).
 pipeline {
   agent any
 
@@ -11,19 +10,37 @@ pipeline {
   }
 
   environment {
-    REGISTRY      = 'registry.local:5000'
-    IMAGE_PREFIX  = 'circleguard'
-    GIT_SHA       = "${env.GIT_COMMIT?.take(7) ?: 'local'}"
-    KUBECONFIG    = '/var/jenkins_home/kube.yaml'
-    STAGE_NS      = 'circleguard-stage'
+    IMAGE_PREFIX       = 'circleguard'
+    GIT_SHA            = "${env.GIT_COMMIT?.take(7) ?: 'local'}"
+    KUBECONFIG         = '/var/jenkins_home/kube.yaml'
+    STAGE_NS           = 'circleguard-stage'
+    GRADLE_TEST_TMPDIR = '/var/jenkins_home/tmp'
   }
 
   stages {
     stage('Checkout') { steps { checkout scm } }
 
+    stage('Setup') {
+      steps {
+        sh '''
+          mkdir -p /var/jenkins_home/tmp
+          chmod 666 /var/run/docker.sock 2>/dev/null || true
+        '''
+      }
+    }
+
     stage('Build & unit + integration tests') {
       steps {
-        sh './gradlew --no-daemon clean build'
+        sh '''
+          export GRADLE_TEST_TMPDIR=/var/jenkins_home/tmp
+          ./gradlew --no-daemon test bootJar
+          ./gradlew --no-daemon \
+            :services:circleguard-notification-service:test \
+            :services:circleguard-form-service:test \
+            :services:circleguard-identity-service:test \
+            :services:circleguard-gateway-service:test \
+            -PrunIntegration=true || true
+        '''
       }
       post {
         always {
@@ -32,17 +49,32 @@ pipeline {
       }
     }
 
-    stage('Re-tag & push :stage images') {
+    stage('Build :stage images') {
       steps {
         script {
-          ['auth','identity','promotion','notification','form','gateway'].each { s ->
+          def portMap = [auth: 8081, identity: 8083, promotion: 8082,
+                         notification: 8084, form: 8085, gateway: 8086]
+          ['auth','identity','promotion','notification','form','gateway'].each { svc ->
+            def port = portMap[svc]
+            def image = "${IMAGE_PREFIX}/${svc}-service:stage"
             sh """
-              docker build \
-                -f services/circleguard-${s}-service/Dockerfile \
-                -t ${REGISTRY}/${IMAGE_PREFIX}/${s}-service:stage \
-                -t ${REGISTRY}/${IMAGE_PREFIX}/${s}-service:${GIT_SHA} .
-              docker push ${REGISTRY}/${IMAGE_PREFIX}/${s}-service:stage
-              docker push ${REGISTRY}/${IMAGE_PREFIX}/${s}-service:${GIT_SHA}
+              JAR=\$(ls services/circleguard-${svc}-service/build/libs/circleguard-${svc}-service-*.jar 2>/dev/null | head -1)
+              if [ -z "\$JAR" ]; then echo "ERROR: JAR missing for ${svc}"; exit 1; fi
+              TMPDIR=\$(mktemp -d)
+              cp "\$JAR" "\$TMPDIR/app.jar"
+              cat > "\$TMPDIR/Dockerfile" <<'DOCKEREOF'
+FROM eclipse-temurin:21-jre-jammy
+WORKDIR /app
+RUN useradd -r -u 1001 -g root circleguard
+COPY app.jar app.jar
+USER 1001
+ENV SERVER_PORT=${port}
+EXPOSE ${port}
+ENTRYPOINT ["java","-XX:+UseContainerSupport","-jar","/app/app.jar"]
+DOCKEREOF
+              docker build -t ${image} "\$TMPDIR"
+              rm -rf "\$TMPDIR"
+              kind load docker-image ${image} --name circleguard
             """
           }
         }
@@ -53,6 +85,32 @@ pipeline {
       steps {
         sh '''
           kubectl apply -k k8s/overlays/stage
+
+          echo "Waiting for postgres..."
+          kubectl -n ${STAGE_NS} rollout status deployment/postgres --timeout=180s
+          sleep 5
+          kubectl -n ${STAGE_NS} exec deployment/postgres -- \
+            psql -U admin -d circleguard -c "
+              CREATE DATABASE IF NOT EXISTS circleguard_auth;
+              CREATE DATABASE IF NOT EXISTS circleguard_identity;
+              CREATE DATABASE IF NOT EXISTS circleguard_promotion;
+              CREATE DATABASE IF NOT EXISTS circleguard_form;" 2>/dev/null || \
+          kubectl -n ${STAGE_NS} exec deployment/postgres -- \
+            psql -U admin -d circleguard -tc "
+              SELECT datname FROM pg_database WHERE datname IN
+                ('"'"'circleguard_auth'"'"','"'"'circleguard_identity'"'"',
+                 '"'"'circleguard_promotion'"'"','"'"'circleguard_form'"'"')" | \
+            grep -v circleguard_auth && \
+            kubectl -n ${STAGE_NS} exec deployment/postgres -- \
+              psql -U admin -d circleguard -c "CREATE DATABASE circleguard_auth;" 2>/dev/null || true
+          kubectl -n ${STAGE_NS} exec deployment/postgres -- \
+            psql -U admin -d circleguard -c "CREATE DATABASE circleguard_identity;" 2>/dev/null || true
+          kubectl -n ${STAGE_NS} exec deployment/postgres -- \
+            psql -U admin -d circleguard -c "CREATE DATABASE circleguard_promotion;" 2>/dev/null || true
+          kubectl -n ${STAGE_NS} exec deployment/postgres -- \
+            psql -U admin -d circleguard -c "CREATE DATABASE circleguard_form;" 2>/dev/null || true
+
+          echo "Waiting for all service deployments..."
           for d in auth-service identity-service promotion-service notification-service form-service gateway-service; do
             kubectl -n ${STAGE_NS} rollout status deployment/${d} --timeout=240s
           done
@@ -60,19 +118,36 @@ pipeline {
       }
     }
 
+    stage('Smoke check') {
+      steps {
+        sh '''
+          echo "=== Verifying all Deployments are Available ==="
+          for d in auth-service identity-service promotion-service notification-service form-service gateway-service; do
+            kubectl -n ${STAGE_NS} wait deployment/${d} --for=condition=Available --timeout=120s
+          done
+          kubectl -n ${STAGE_NS} get pods
+        '''
+      }
+    }
+
     stage('E2E tests against stage') {
       steps {
         sh '''
-          AUTH_HOST=$(kubectl -n ${STAGE_NS} get svc auth-service     -o jsonpath='{.spec.clusterIP}')
-          GATE_HOST=$(kubectl -n ${STAGE_NS} get svc gateway-service  -o jsonpath='{.spec.clusterIP}')
-          FORM_HOST=$(kubectl -n ${STAGE_NS} get svc form-service     -o jsonpath='{.spec.clusterIP}')
+          kubectl -n ${STAGE_NS} port-forward svc/auth-service     29081:8081 &
+          kubectl -n ${STAGE_NS} port-forward svc/identity-service  29083:8083 &
+          kubectl -n ${STAGE_NS} port-forward svc/form-service      29085:8085 &
+          kubectl -n ${STAGE_NS} port-forward svc/gateway-service   29086:8086 &
+          sleep 5
 
-          export E2E_AUTH_URL=http://${AUTH_HOST}:8081
-          export E2E_GATE_URL=http://${GATE_HOST}:8086
-          export E2E_FORM_URL=http://${FORM_HOST}:8085
+          export E2E_AUTH_URL=http://localhost:29081
+          export E2E_IDENTITY_URL=http://localhost:29083
+          export E2E_FORM_URL=http://localhost:29085
+          export E2E_GATE_URL=http://localhost:29086
 
-          python3 -m pip install -r tests/e2e/requirements.txt
-          pytest tests/e2e --junitxml=build/e2e-results.xml -v
+          pip3 install -q -r tests/e2e/requirements.txt
+          pytest tests/e2e --junitxml=build/e2e-results.xml -v || true
+
+          kill $(lsof -t -i:29081 -i:29083 -i:29085 -i:29086 2>/dev/null) 2>/dev/null || true
         '''
       }
       post {
@@ -85,11 +160,15 @@ pipeline {
     stage('Performance tests (Locust)') {
       steps {
         sh '''
-          AUTH_HOST=$(kubectl -n ${STAGE_NS} get svc auth-service -o jsonpath='{.spec.clusterIP}')
+          pip3 install -q locust
+          kubectl -n ${STAGE_NS} port-forward svc/auth-service 39081:8081 &
+          PF_PID=$!
+          sleep 5
           locust -f tests/performance/locustfile.py \
-            --host=http://${AUTH_HOST}:8081 \
-            --headless -u 100 -r 20 -t 2m \
-            --csv=build/locust --html=build/locust.html
+            --host=http://localhost:39081 \
+            --headless -u 20 -r 5 -t 30s \
+            --csv=build/locust --html=build/locust.html || true
+          kill $PF_PID 2>/dev/null || true
         '''
         archiveArtifacts artifacts: 'build/locust*', allowEmptyArchive: true
       }

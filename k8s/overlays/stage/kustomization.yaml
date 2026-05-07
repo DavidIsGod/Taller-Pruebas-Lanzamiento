@@ -4,20 +4,21 @@ namespace: circleguard-stage
 resources:
   - ../../base
 images:
-  - { name: circleguard/auth-service,         newTag: stage }
-  - { name: circleguard/identity-service,     newTag: stage }
-  - { name: circleguard/promotion-service,    newTag: stage }
-  - { name: circleguard/notification-service, newTag: stage }
-  - { name: circleguard/form-service,         newTag: stage }
-  - { name: circleguard/gateway-service,      newTag: stage }
+  - { name: circleguard/auth-service,         newName: circleguard/auth-service,         newTag: stage }
+  - { name: circleguard/identity-service,     newName: circleguard/identity-service,     newTag: stage }
+  - { name: circleguard/promotion-service,    newName: circleguard/promotion-service,    newTag: stage }
+  - { name: circleguard/notification-service, newName: circleguard/notification-service, newTag: stage }
+  - { name: circleguard/form-service,         newName: circleguard/form-service,         newTag: stage }
+  - { name: circleguard/gateway-service,      newName: circleguard/gateway-service,      newTag: stage }
 patches:
   - target: { kind: Namespace, name: circleguard }
     patch: |-
       - op: replace
         path: /metadata/name
         value: circleguard-stage
-  - target: { kind: Deployment, name: ".*" }
+  # Use IfNotPresent so kind doesn't try to pull from a remote registry.
+  - target: { kind: Deployment }
     patch: |-
-      - op: replace
-        path: /spec/replicas
-        value: 2
+      - op: add
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: IfNotPresent

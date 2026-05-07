@@ -1,6 +1,18 @@
 # Middleware shared by all environments.
 # Single replicas, ephemeral storage (workshop scope).
 ---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init
+data:
+  init-databases.sql: |
+    -- Create per-service databases used by each microservice.
+    CREATE DATABASE circleguard_auth;
+    CREATE DATABASE circleguard_identity;
+    CREATE DATABASE circleguard_promotion;
+    CREATE DATABASE circleguard_form;
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -11,6 +23,10 @@ spec:
   template:
     metadata: { labels: { app: postgres } }
     spec:
+      volumes:
+        - name: postgres-init
+          configMap:
+            name: postgres-init
       containers:
         - name: postgres
           image: postgres:16
@@ -19,6 +35,9 @@ spec:
             - { name: POSTGRES_USER,     value: admin }
             - { name: POSTGRES_PASSWORD, value: password }
             - { name: POSTGRES_DB,       value: circleguard }
+          volumeMounts:
+            - name: postgres-init
+              mountPath: /docker-entrypoint-initdb.d
 ---
 apiVersion: v1
 kind: Service
@@ -102,10 +121,11 @@ spec:
             - { containerPort: 7474 }
             - { containerPort: 7687 }
           env:
-            - { name: NEO4J_AUTH, value: "neo4j/password" }
+            - { name: NEO4J_AUTH, value: "none" }
             - { name: NEO4J_server_default__listen__address, value: "0.0.0.0" }
             - { name: NEO4J_server_bolt_listen__address, value: "0.0.0.0:7687" }
             - { name: NEO4J_server_http_listen__address, value: "0.0.0.0:7474" }
+            - { name: NEO4J_dbms_security_auth__enabled, value: "false" }
 ---
 apiVersion: v1
 kind: Service
