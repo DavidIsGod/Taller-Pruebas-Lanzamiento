@@ -42,12 +42,22 @@ def promotion_url() -> str:
 
 @pytest.fixture(scope="session", autouse=True)
 def wait_for_stack(auth_url, identity_url, form_url, gateway_url):
-    """Block until every service replies 200 on /actuator/health."""
+    """Block until each service answers HTTP (stack up).
+
+    Actuator is not bundled in workshop images; we accept any sub-500 response
+    on / first, then /actuator/health if present.
+    """
     @retry(stop=stop_after_delay(120), wait=wait_fixed(3))
     def _hit(url: str):
-        r = requests.get(f"{url}/actuator/health", timeout=3)
-        r.raise_for_status()
-        return r
+        base = url.rstrip("/")
+        for path in ("/actuator/health", "/"):
+            try:
+                r = requests.get(f"{base}{path}", timeout=5)
+                if r.status_code < 500:
+                    return r
+            except requests.RequestException:
+                continue
+        raise RuntimeError(f"{url}: no reachable HTTP endpoint")
 
     for url in [auth_url, identity_url, form_url, gateway_url]:
         try:

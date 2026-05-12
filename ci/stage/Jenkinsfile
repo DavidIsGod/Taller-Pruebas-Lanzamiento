@@ -161,11 +161,18 @@ DOCKEREOF
       steps {
         sh '''
           python3 -m pip install -q --break-system-packages locust
-          kubectl -n ${STAGE_NS} port-forward svc/auth-service 39081:8081 &
-          PF_PID=$!
+          # Port-forward each service; do NOT pass --host to Locust — it overrides
+          # per-HttpUser hosts in locustfile.py and caused 404s on gateway/form paths.
+          kubectl -n ${STAGE_NS} port-forward svc/auth-service      39081:8081 &
+          kubectl -n ${STAGE_NS} port-forward svc/gateway-service     39086:8086 &
+          kubectl -n ${STAGE_NS} port-forward svc/form-service        39085:8085 &
+          kubectl -n ${STAGE_NS} port-forward svc/identity-service    39083:8083 &
           sleep 5
+          export AUTH_URL=http://localhost:39081
+          export GATEWAY_URL=http://localhost:39086
+          export FORM_URL=http://localhost:39085
+          export IDENTITY_URL=http://localhost:39083
           python3 -m locust -f tests/performance/locustfile.py \
-            --host=http://localhost:39081 \
             --headless -u 20 -r 5 -t 30s \
             --csv=build/locust --html=build/locust.html || true
           pkill -f "kubectl.*port-forward" 2>/dev/null || true
